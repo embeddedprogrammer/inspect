@@ -8,7 +8,7 @@ using namespace std;
 
 int val;
 
-enum Action { none, binarize, canny, lines, diff, harris, tenis };
+enum Action { none, binarize, canny, lines, diff, harris, tenis, otsu };
 Action action = none;
 
 RNG rng(12345);
@@ -60,6 +60,8 @@ void pressKey(int key)
 		action = tenis;
 	else if (key == 'b')
 		action = binarize;
+	else if (key == 'u')
+		action = otsu;
 	else if (key == 'c')
 		action = canny;
 	else if (key == 'h')
@@ -74,6 +76,35 @@ void pressKey(int key)
 		printf("%d\n", key);
 }
 
+Point2f calcLineIntersection(Size imgSize, float rho, float theta, bool vertical, bool dir)
+{
+	int dirInt = dir ? 1 : -1;
+	float dy1 = -cos(theta)*dirInt;
+	float dx1 = sin(theta)*dirInt;
+	Point2f point(rho*cos(theta), rho*sin(theta));
+	if (vertical)
+	{
+		float dx2 = (dx1 < 0 ? 0 : imgSize.width) - point.x;
+		int dy2 = dy1 * dx2 / dx1;
+		return Point(point.x + dx2, point.y + dy2);
+	}
+	else
+	{
+		float dy2 = (dy1 < 0 ? 0 : imgSize.height) - point.y;
+		int dx2 = dx1 * dy2 / dy1;
+		return Point(point.x + dx2, point.y + dy2);
+	}
+}
+
+Point calcRectIntersection(Size imgSize, float rho, float theta, bool dir)
+{
+	Point p1 = calcLineIntersection(imgSize, rho, theta, true, dir);
+	if (p1.x >= 0 && p1.y >= 0 && p1.x <= imgSize.width && p1.y <= imgSize.height)
+		return p1;
+	else
+		return calcLineIntersection(imgSize, rho, theta, false, dir);
+}
+
 void processImage()
 {
 	//Process image using chosen settings
@@ -84,6 +115,14 @@ void processImage()
 		Mat result_gray;
 		inRange(img, Scalar(val, val, val), Scalar(255, 255, 255), result_gray);
 		cvtColor(result_gray, result, CV_GRAY2BGR);
+	}
+	else if (action == otsu)
+	{
+		// Thresholding image
+		Mat gray, bw;
+		cvtColor(img, gray, CV_BGR2GRAY);
+		cv::threshold(gray, bw, 60, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+		result = bw;
 	}
 	else if (action == tenis)
 	{
@@ -164,18 +203,30 @@ void processImage()
 		blur(gray, detectedEdges, Size(3, 3));
 
 		/// Canny detector
-		Canny(detectedEdges, detectedEdges, val, val * 3, 3);
+		int val2 = 30;
+		Canny(detectedEdges, detectedEdges, val2, val2 * 3, 3);
 
 		Mat edgesC;
 		cvtColor(detectedEdges, edgesC, CV_GRAY2BGR);
 
-		vector<Vec4i> lines;
-		HoughLinesP(detectedEdges, lines, 1, CV_PI / 180, 50, 50, 10);
+		vector<Vec2f> lines;
+		HoughLines(detectedEdges, lines, 1, CV_PI / 180, 150 + val);
 		result = edgesC;
+		printf("\nAll lines:\n");
 		for (size_t i = 0; i < lines.size(); i++)
 		{
-			Vec4i l = lines[i];
-			line(result, Point(l[0], l[1]), Point(l[2], l[3]), Scalar(0, 0, 255), 1, CV_AA);
+			float rho = lines[i][0], theta = lines[i][1];
+			if (rho < 0)
+			{
+				rho = -rho;
+				theta += CV_PI;
+				if (theta > CV_PI)
+					theta -= 2 * CV_PI;
+			}
+			Point2f p1 = calcRectIntersection(img.size(), rho, theta, true);
+			Point2f p2 = calcRectIntersection(img.size(), rho, theta, false);
+			printf("Rho: %f Theta: %f (%.1f, %.1f) to (%.1f, %.1f)\n", rho, theta, p1.x, p1.y, p2.x, p2.y);
+			line(result, p1, p2, rho > 300 ? Scalar(0, 0, 255) : Scalar(255, 0, 0), 1, CV_AA);
 		}
 	}
 	else if (action == diff)

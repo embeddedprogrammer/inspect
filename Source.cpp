@@ -1,3 +1,5 @@
+
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
@@ -8,6 +10,9 @@ using namespace std;
 
 #define LEFT_ARROW 2424832
 #define RIGHT_ARROW 2555904
+#define MIN_IMG_NUMBER 1
+#define MAX_IMG_NUMBER 15
+#define STARTING_IMG_NUMBER 1
 
 Mat img;
 int imageNumber;
@@ -21,7 +26,7 @@ int roiBelow = 170;
 void loadImage(int imageNumber)
 {
 	char name[20];
-	sprintf(name, "image%03d.jpg", imageNumber);
+	sprintf(name, "img (%d).bmp", imageNumber);
 	string str_name(name);
 	img = imread(str_name);
 }
@@ -30,16 +35,16 @@ void pressKey(int key)
 {
 	if (key == LEFT_ARROW)
 	{
-		imageNumber -= 2;
-		if (imageNumber < 34)
-			imageNumber = 72;
+		imageNumber -= 1;
+		if (imageNumber < MIN_IMG_NUMBER)
+			imageNumber = MAX_IMG_NUMBER;
 		loadImage(imageNumber);
 	}
 	else if (key == RIGHT_ARROW)
 	{
-		imageNumber += 2;
-		if (imageNumber > 72)
-			imageNumber = 34;
+		imageNumber += 1;
+		if (imageNumber > MAX_IMG_NUMBER)
+			imageNumber = MIN_IMG_NUMBER;
 		loadImage(imageNumber);
 	}
 }
@@ -100,7 +105,7 @@ void processImage()
 int main(int argc, char** argv)
 {
 	VideoWriter VOut;
-	imageNumber = 34;
+	imageNumber = STARTING_IMG_NUMBER;
 
 	namedWindow("White", CV_WINDOW_AUTOSIZE);
 	loadImage(imageNumber);

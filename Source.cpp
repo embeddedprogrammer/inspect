@@ -213,21 +213,39 @@ void processImage()
 		HoughLines(detectedEdges, lines, 1, CV_PI / 180, 150 + val);
 		result = edgesC;
 		printf("\nAll lines:\n");
+		int roiX1 = 0;
+		int roiX2 = img.size().width;
 		for (size_t i = 0; i < lines.size(); i++)
 		{
 			float rho = lines[i][0], theta = lines[i][1];
-			if (rho < 0)
-			{
-				rho = -rho;
-				theta += CV_PI;
-				if (theta > CV_PI)
-					theta -= 2 * CV_PI;
-			}
 			Point2f p1 = calcRectIntersection(img.size(), rho, theta, true);
 			Point2f p2 = calcRectIntersection(img.size(), rho, theta, false);
-			printf("Rho: %f Theta: %f (%.1f, %.1f) to (%.1f, %.1f)\n", rho, theta, p1.x, p1.y, p2.x, p2.y);
-			line(result, p1, p2, rho > 300 ? Scalar(0, 0, 255) : Scalar(255, 0, 0), 1, CV_AA);
+			if (p1.x < img.size().width / 2)
+			{
+				if (p1.x > roiX1)
+					roiX1 = p1.x;
+			}
+			else
+				if (p1.x < roiX2)
+					roiX2 = p1.x;
+
+			if (p2.x < img.size().width / 2)
+			{
+				if (p2.x > roiX1)
+					roiX1 = p2.x;
+			}
+			else
+				if (p2.x < roiX2)
+					roiX2 = p2.x;
+			printf("Rho: %4d Theta: %4.2f (%4d, %4d) to (%4d, %4d)", (int)rho, theta, (int)p1.x, (int)p1.y, (int)p2.x, (int)p2.y);
+			printf(" ROI: %d %d\n", roiX1, roiX2);
+			line(result, p1, p2, abs(rho) > 300 ? Scalar(0, 0, 255) : Scalar(255, 0, 0), 1, CV_AA);
 		}
+		Rect roi(roiX1, 0, roiX2 - roiX1, img.size().height);
+		rectangle(result, roi, Scalar(0, 255, 0), 1, CV_AA);
+
+		//Mat croppedImg(img, roi);
+		//result = croppedImg;		
 	}
 	else if (action == diff)
 	{

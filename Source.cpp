@@ -105,6 +105,49 @@ Point calcRectIntersection(Size imgSize, float rho, float theta, bool dir)
 		return calcLineIntersection(imgSize, rho, theta, false, dir);
 }
 
+void calcCrop(Size& imgSize, vector<Vec2f>& lines, vector<Point2f>& pts, Rect& roi)
+{
+	Mat edgesC;
+	int roiX1 = 0;
+	int roiX2 = imgSize.width;
+	for (int i = 0; i < lines.size(); i++)
+	{
+		float rho = lines[i][0], theta = lines[i][1];
+		Point2f p1 = calcRectIntersection(img.size(), rho, theta, true);
+		Point2f p2 = calcRectIntersection(img.size(), rho, theta, false);
+		if (p1.x < imgSize.width / 2)
+		{
+			if (p1.x > roiX1)
+				roiX1 = p1.x;
+		}
+		else
+			if (p1.x < roiX2)
+				roiX2 = p1.x;
+
+		if (p2.x < imgSize.width / 2)
+		{
+			if (p2.x > roiX1)
+				roiX1 = p2.x;
+		}
+		else
+			if (p2.x < roiX2)
+				roiX2 = p2.x;
+		pts.push_back(p1);
+		pts.push_back(p2);
+	}
+	Rect roi2(roiX1, 0, roiX2 - roiX1, img.size().height);
+	roi = roi2;
+}
+
+void drawCrop(Mat& img, vector<Point2f> pts, Rect& roi)
+{
+	for (int i = 0; i < pts.size(); i += 2)
+	{
+		line(img, pts[i], pts[i + 1], pts[i].x > img.size().width / 2 ? Scalar(0, 0, 255) : Scalar(255, 0, 0), 1, CV_AA);
+	}
+	rectangle(img, roi, Scalar(0, 255, 0), 1, CV_AA);
+}
+
 void processImage()
 {
 	//Process image using chosen settings
@@ -206,43 +249,17 @@ void processImage()
 		int val2 = 30;
 		Canny(detectedEdges, detectedEdges, val2, val2 * 3, 3);
 
+		vector<Vec2f> lines;
+		HoughLines(detectedEdges, lines, 1, CV_PI / 180, 150);
 		Mat edgesC;
 		cvtColor(detectedEdges, edgesC, CV_GRAY2BGR);
-
-		vector<Vec2f> lines;
-		HoughLines(detectedEdges, lines, 1, CV_PI / 180, 150 + val);
 		result = edgesC;
-		printf("\nAll lines:\n");
-		int roiX1 = 0;
-		int roiX2 = img.size().width;
-		for (size_t i = 0; i < lines.size(); i++)
-		{
-			float rho = lines[i][0], theta = lines[i][1];
-			Point2f p1 = calcRectIntersection(img.size(), rho, theta, true);
-			Point2f p2 = calcRectIntersection(img.size(), rho, theta, false);
-			if (p1.x < img.size().width / 2)
-			{
-				if (p1.x > roiX1)
-					roiX1 = p1.x;
-			}
-			else
-				if (p1.x < roiX2)
-					roiX2 = p1.x;
 
-			if (p2.x < img.size().width / 2)
-			{
-				if (p2.x > roiX1)
-					roiX1 = p2.x;
-			}
-			else
-				if (p2.x < roiX2)
-					roiX2 = p2.x;
-			printf("Rho: %4d Theta: %4.2f (%4d, %4d) to (%4d, %4d)", (int)rho, theta, (int)p1.x, (int)p1.y, (int)p2.x, (int)p2.y);
-			printf(" ROI: %d %d\n", roiX1, roiX2);
-			line(result, p1, p2, abs(rho) > 300 ? Scalar(0, 0, 255) : Scalar(255, 0, 0), 1, CV_AA);
-		}
-		Rect roi(roiX1, 0, roiX2 - roiX1, img.size().height);
-		rectangle(result, roi, Scalar(0, 255, 0), 1, CV_AA);
+		vector<Point2f> pts;
+		Rect roi;
+		calcCrop(img.size(), lines, pts, roi);
+
+		drawCrop(result, pts, roi);
 
 		//Mat croppedImg(img, roi);
 		//result = croppedImg;		

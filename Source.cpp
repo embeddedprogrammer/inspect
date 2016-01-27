@@ -6,9 +6,9 @@
 using namespace cv;
 using namespace std;
 
-int val;
+int val[3];
 
-enum Action { none, binarize, canny, lines, diff, harris, tenis, otsu };
+enum Action { none, binarize, canny, lines, diff, harris, pretzel, otsu, hsvHue, hsvSat, hsvVal};
 Action action = none;
 
 RNG rng(12345);
@@ -21,7 +21,7 @@ RNG rng(12345);
 #define MAX_IMG_NUMBER 15
 #define STARTING_IMG_NUMBER 1
 
-Mat img;
+Mat img, hsv;
 int imageNumber;
 Mat result, frame2;
 
@@ -57,21 +57,25 @@ void pressKey(int key)
 	else if (key == 'o' || key == 'n')
 		action = none;
 	else if (key == 't')
-		action = tenis;
+		action = pretzel;
 	else if (key == 'b')
 		action = binarize;
 	else if (key == 'u')
 		action = otsu;
 	else if (key == 'c')
 		action = canny;
-	else if (key == 'h')
-		action = harris;
 	else if (key == 'l')
 		action = lines;
 	else if (key == 'd')
 		action = diff;
+	else if (key == 'h')
+		action = hsvHue;
 	else if (key == 's')
-		imwrite("test.png", result);
+		action = hsvSat;
+	else if (key == 'v')
+		action = hsvVal;
+	//else if (key == 's')
+	//	imwrite("test.png", result);
 	else if (key != -1)
 		printf("%d\n", key);
 }
@@ -148,6 +152,35 @@ void drawCrop(Mat& img, vector<Point2f> pts, Rect& roi)
 	rectangle(img, roi, Scalar(0, 255, 0), 1, CV_AA);
 }
 
+void getChannel(Mat& img, Mat& imgChannel, int channel)
+{
+	Mat channels[3];
+	split(img, channels);
+	imgChannel = channels[channel];
+}
+
+void setHsv(Mat& before, Mat& hsv, Mat& after, int channel)
+{
+	vector<Mat> channels;
+	cvtColor(before, hsv, CV_BGR2HSV);
+	split(hsv, channels);
+	if (channel != 0)
+		channels[0].setTo(179);
+	if (channel != 1)
+		channels[1].setTo(255);
+	if (channel != 2)
+		channels[2].setTo(255);
+	merge(channels, hsv);
+	cvtColor(hsv, after, CV_HSV2BGR);
+}
+
+void hueDist(Mat& hsv, Mat& dist, int hueVal)
+{
+	Mat hue;
+	getChannel(hsv, hue, 0);
+	absdiff(hue, hueVal, dist);
+}
+
 void processImage()
 {
 	//Process image using chosen settings
@@ -155,10 +188,17 @@ void processImage()
 		result = img;
 	else if (action == binarize)
 	{
-		Mat result_gray;
-		inRange(img, Scalar(val, val, val), Scalar(255, 255, 255), result_gray);
+		Mat result_gray, hsv;
+		cvtColor(img, hsv, CV_BGR2HSV);
+		inRange(hsv, Scalar(val[0], val[1], val[2]), Scalar(255, 255, 255), result_gray);
 		cvtColor(result_gray, result, CV_GRAY2BGR);
 	}
+	else if (action == hsvHue)
+		setHsv(img, hsv, result, 0);
+	else if (action == hsvSat)
+		setHsv(img, hsv, result, 1);
+	else if (action == hsvVal)
+		setHsv(img, hsv, result, 2);
 	else if (action == otsu)
 	{
 		// Thresholding image
@@ -167,59 +207,40 @@ void processImage()
 		cv::threshold(gray, bw, 60, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
 		result = bw;
 	}
-	else if (action == tenis)
+	else if (action == pretzel)
 	{
-		// Crop image
-		cv::Rect myROI(ballCenter.x - roiSide, ballCenter.y - roiAbove, roiSide * 2, roiAbove + roiBelow);
-		if (myROI.x < 0)
-			myROI.x = 0;
-		if (myROI.y < 0)
-			myROI.y = 0;
-		if (myROI.x + myROI.width > img.size().width)
-			myROI.width = img.size().width - myROI.x;
-		if (myROI.y + myROI.height > img.size().height)
-			myROI.height = img.size().height - myROI.y;
-		Mat croppedImage = img(myROI);
+		cvtColor(img, hsv, CV_BGR2HSV);
+		hueDist(hsv, result, 16);
 
-		// Thresholding image
-		Mat gray, gray_bgr, bw;
-		cvtColor(croppedImage, gray, CV_BGR2GRAY);
-		cv::threshold(gray, bw, 60, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+		
 
-		// Plop back into original image
-		croppedImage.setTo(Scalar(0, 0, 255), bw);
-		result = img;
 
-		//Set next ROI
-		vector< vector<Point> > contours;
-		vector<Vec4i> hierarchy;
+		////find contours of filtered image using openCV findContours function
+		//findContours(bw, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE);
 
-		//find contours of filtered image using openCV findContours function
-		findContours(bw, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE);
+		//int largestMomentIndex = 0;
+		//int largestMoment = 0;
+		//for (int i = 0; i < hierarchy.size(); i++)
+		//{
+		//	Moments mm = moments((Mat)contours[i]);
+		//	if (mm.m00 > largestMoment)
+		//	{
+		//		largestMomentIndex = i;
+		//		largestMoment = mm.m00;
+		//	}
+		//}
 
-		int largestMomentIndex = 0;
-		int largestMoment = 0;
-		for (int i = 0; i < hierarchy.size(); i++)
-		{
-			Moments mm = moments((Mat)contours[i]);
-			if (mm.m00 > largestMoment)
-			{
-				largestMomentIndex = i;
-				largestMoment = mm.m00;
-			}
-		}
+		//Moments mm = moments((Mat)contours[largestMomentIndex]);
+		//double m00 = mm.m00;
+		//double m10 = mm.m10;
+		//double m01 = mm.m01;
+		//double centerX = (m10 / m00);
+		//double centerY = (m01 / m00);
 
-		Moments mm = moments((Mat)contours[largestMomentIndex]);
-		double m00 = mm.m00;
-		double m10 = mm.m10;
-		double m01 = mm.m01;
-		double centerX = (m10 / m00);
-		double centerY = (m01 / m00);
+		//circle(croppedImage, Point(centerX, centerY), 4, Scalar(255, 0, 0));
 
-		circle(croppedImage, Point(centerX, centerY), 4, Scalar(255, 0, 0));
-
-		ballCenter.x += centerX - roiSide;
-		ballCenter.y += centerY - roiAbove;
+		//ballCenter.x += centerX - roiSide;
+		//ballCenter.y += centerY - roiAbove;
 	}
 	else if (action == canny)
 	{
@@ -232,7 +253,7 @@ void processImage()
 		blur(gray, detectedEdges, Size(3, 3));
 
 		// Canny detector
-		Canny(detectedEdges, detectedEdges, val, val * 3, 3);
+		Canny(detectedEdges, detectedEdges, val[0], val[0] * 3, 3);
 		result = detectedEdges;
 	}
 	else if (action == lines)
@@ -279,8 +300,8 @@ void processImage()
 		Mat gray;
 		Mat dst, dst_norm, dst_norm_scaled;
 		cvtColor(img, gray, CV_BGR2GRAY);
-		if (val < 1)
-			val = 1;
+		if (val[0] < 1)
+			val[0] = 1;
 
 		/// Parameters for Shi-Tomasi algorithm
 		vector<Point2f> corners;
@@ -295,7 +316,7 @@ void processImage()
 		copy = img.clone();
 
 		/// Apply corner detection
-		goodFeaturesToTrack(gray, corners, val, qualityLevel,
+		goodFeaturesToTrack(gray, corners, val[0], qualityLevel,
 			minDistance, Mat(), blockSize, useHarrisDetector, k);
 
 		/// Draw corners detected
@@ -327,12 +348,24 @@ void processImage()
 void trackbarCallback(int, void*)
 {
 	processImage();
+
 }
 
 void mouseCallback(int event, int x, int y, int flags, void* userdata)
 {
 	if (event == EVENT_LBUTTONDOWN)
-		printf("Location: %d %d\n", x, y);
+	{
+		if (hsv.empty())
+		{
+			printf("empty\n");
+			return;
+		}
+		Vec3b v = hsv.at<Vec3b>(y, x);
+		printf("%d %d %d\n", v[0], v[1], v[2]);
+		Mat dist;
+		hueDist(hsv, dist, hsv.at<Vec3b>(y, x)[0]);
+		imshow("White", dist);
+	}
 }
 
 int main(int argc, char** argv)
@@ -342,7 +375,9 @@ int main(int argc, char** argv)
 
 	namedWindow("White", CV_WINDOW_AUTOSIZE);
 	setMouseCallback("White", mouseCallback, NULL);
-	createTrackbar("Threshold", "White", &val, 255, trackbarCallback);
+	createTrackbar("H Threshold", "White", &val[0], 255, trackbarCallback);
+	createTrackbar("S Threshold", "White", &val[1], 255, trackbarCallback);
+	createTrackbar("V Threshold", "White", &val[2], 255, trackbarCallback);
 	loadImage(imageNumber);
 	while (true)
 	{

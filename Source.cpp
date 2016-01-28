@@ -8,11 +8,20 @@ using namespace std;
 
 int val[3];
 
+enum GrayAction { g_none, g_cvt, g_hue, g_sat, g_val, g_hue_val};
+enum BinarizeAction { b_none, b_threshold, b_rgb, b_hsv, b_otsu };
 enum Action { none, binarize, canny, action_lines, diff, harris, pretzel, otsu, hsvHue, hsvSat, hsvVal, c0, c1, c2};
+GrayAction g_action = g_none;
+BinarizeAction b_action = b_none;
 Action action = none;
+bool displayHist;
+bool gaussianSmoothing;
+bool erodeDilate;
+
 
 RNG rng(12345);
 
+#define ENTER 13
 #define LEFT_ARROW 2424832
 #define UP_ARROW 2490368
 #define RIGHT_ARROW 2555904
@@ -21,16 +30,17 @@ RNG rng(12345);
 #define MAX_IMG_NUMBER 16
 #define STARTING_IMG_NUMBER 1
 
-Mat img, imgCropped, imgHsv;
+Mat img, imgHsv;
 int imageNumber;
-Mat imgResult, frame2;
 
 Point2i ballCenter(260, 175);
 int roiAbove = 20;
 int roiSide = 70;
 int roiBelow = 170;
 
-void loadImage(int imageNumber)
+void processImage();
+
+void loadImage(Mat& img, int imageNumber)
 {
 	char name[20];
 	sprintf(name, "img (%d).bmp", imageNumber);
@@ -96,6 +106,8 @@ void showHistogram(Mat& img)
 	}
 }
 
+string cmd = "";
+
 void pressKey(int key)
 {
 	if (key == LEFT_ARROW)
@@ -103,43 +115,88 @@ void pressKey(int key)
 		imageNumber -= 1;
 		if (imageNumber < MIN_IMG_NUMBER)
 			imageNumber = MAX_IMG_NUMBER;
-		loadImage(imageNumber);
+		processImage();
 	}
 	else if (key == RIGHT_ARROW)
 	{
 		imageNumber += 1;
 		if (imageNumber > MAX_IMG_NUMBER)
 			imageNumber = MIN_IMG_NUMBER;
-		loadImage(imageNumber);
+		processImage();
 	}
-	else if (key == 'o' || key == 'n')
-		action = none;
-	else if (key == 't')
-		action = pretzel;
-	else if (key == 'b')
-		action = binarize;
-	else if (key == 'u')
-		action = otsu;
-	else if (key == 'c')
-		action = canny;
-	else if (key == 'l')
-		action = action_lines;
-	else if (key == 'd')
-		action = diff;
-	else if (key == 'h')
-		action = hsvHue;
-	else if (key == 's')
-		action = hsvSat;
-	else if (key == 'v')
-		action = hsvVal;
-	else if (key == '0')
-		action = c0;
-	else if (key == '1')
-		action = c1;
-	else if (key == '2')
-		action = c2;
-	//else if (key == 's')
-	//	imwrite("test.png", result);
+	else if (key == ENTER)
+	{
+		// Grayscale commands
+		if (cmd == "gn")
+			g_action = g_none;
+		else if (cmd == "gh")
+			g_action = g_hue;
+		else if (cmd == "gs")
+			g_action = g_sat;
+		else if (cmd == "gv")
+			g_action = g_val;
+		else if (cmd == "gc")
+			g_action = g_cvt;
+		else if (cmd == "ghv")
+			g_action = g_hue_val;
+
+		// Binarization commands
+		else if (cmd == "bn")
+			b_action = b_none;
+		else if (cmd == "bt")
+			b_action = b_threshold;
+		else if (cmd == "brgb")
+			b_action = b_rgb;
+		else if (cmd == "bhsv")
+			b_action = b_hsv;
+		else if (cmd == "bo")
+			b_action = b_otsu;
+
+		// Smoothing commands
+		else if (cmd == "ed")
+			erodeDilate = !erodeDilate;
+		else if (cmd == "g")
+			gaussianSmoothing = !gaussianSmoothing;
+
+		// Other commands
+		else if (cmd == "none")
+			action = none;
+		else if (cmd == "t")
+			action = pretzel;
+		else if (cmd == "b")
+			action = binarize;
+		else if (cmd == "u")
+			action = otsu;
+		else if (cmd == "c")
+			action = canny;
+		else if (cmd == "l")
+			action = action_lines;
+		else if (cmd == "d")
+			action = diff;
+		else if (cmd == "h")
+			action = hsvHue;
+		else if (cmd == "s")
+			action = hsvSat;
+		else if (cmd == "v")
+			action = hsvVal;
+		else if (cmd == "0")
+			action = c0;
+		else if (cmd == "1")
+			action = c1;
+		else if (cmd == "2")
+			action = c2;
+		else if (cmd == "save")
+			imwrite("test.png", img);
+		else if (cmd == "hist")
+			displayHist = !displayHist;
+		cmd = "";
+		cout << endl << ">";
+	}
+	else if (key >= 'a' && key <= 'z')
+	{
+		cmd = cmd + ((char)key);
+		cout << ((char)key);
+	}
 	else if (key != -1)
 		printf("%d\n", key);
 }
@@ -181,8 +238,8 @@ void calcCrop(Size& imgSize, vector<Vec2f>& lines, vector<Point2f>& pts, Rect& r
 	for (int i = 0; i < lines.size(); i++)
 	{
 		float rho = lines[i][0], theta = lines[i][1];
-		Point2f p1 = calcRectIntersection(imgCropped.size(), rho, theta, true);
-		Point2f p2 = calcRectIntersection(imgCropped.size(), rho, theta, false);
+		Point2f p1 = calcRectIntersection(imgSize, rho, theta, true);
+		Point2f p2 = calcRectIntersection(imgSize, rho, theta, false);
 		if (p1.x < imgSize.width / 2)
 		{
 			if (p1.x > roiX1)
@@ -203,7 +260,7 @@ void calcCrop(Size& imgSize, vector<Vec2f>& lines, vector<Point2f>& pts, Rect& r
 		pts.push_back(p1);
 		pts.push_back(p2);
 	}
-	Rect roi2(roiX1, 0, roiX2 - roiX1, imgCropped.size().height);
+	Rect roi2(roiX1, 0, roiX2 - roiX1, imgSize.height);
 	roi = roi2;
 }
 
@@ -212,10 +269,8 @@ void drawCrop(Mat& img, vector<Point2f> pts, Rect& roi)
 	for (int i = 0; i < pts.size(); i += 2)
 	{
 		line(img, pts[i], pts[i + 1], pts[i].x > img.size().width / 2 ? Scalar(0, 0, 255) : Scalar(255, 0, 0), 1, CV_AA);
-		printf("draw line\n");
 	}
 	rectangle(img, roi, Scalar(0, 255, 0), 1, CV_AA);
-	imshow("drawCrop", img);
 }
 
 void getChannel(Mat& img, Mat& imgChannel, int channel)
@@ -257,6 +312,8 @@ void channelDist(Mat& hsv, Mat& dist, int hueVal, int channel)
 
 void processImage()
 {
+	static Mat frame2;
+	loadImage(img, imageNumber);
 
 // Crop the image
 	/// Convert the image to grayscale
@@ -276,7 +333,6 @@ void processImage()
 
 	Mat edgesC;
 	cvtColor(detectedEdges, edgesC, CV_GRAY2BGR);
-	imgResult = edgesC;
 
 	vector<Point2f> pts;
 	Rect roi;
@@ -284,110 +340,72 @@ void processImage()
 
 	Mat img2(img, roi);
 
-	if(!img2.empty())
-		imshow("img2", img2);
+	if (imageNumber != 16)
+		img = img2;
 
-	//if (imageNumber != 16)
-		imgCropped = img2;
-	//else
-	//	imgCropped = img;
-
-//Process image using chosen settings
-	if (action == none)
+//Apply grayscale
+	if (g_action == g_hue)
 	{
-		imgResult = imgCropped;
-		printf("none - imgResult = imgCropped\n");
+		cvtColor(img, imgHsv, CV_BGR2HSV);
+		channelDist(imgHsv, img, 16, 0);
+		bitwise_not(img, img);
 	}
-	else if (action == binarize)
+	else if (g_action == g_sat)
 	{
-		Mat result_gray, hsv;
-		cvtColor(imgCropped, hsv, CV_BGR2HSV);
-		inRange(hsv, Scalar(val[0], val[1], val[2]), Scalar(255, 255, 255), result_gray);
-		cvtColor(result_gray, imgResult, CV_GRAY2BGR);
+		cvtColor(img, imgHsv, CV_BGR2HSV);
+		getChannel(imgHsv, img, 1);
 	}
-	else if (action == hsvHue)
-		setHsv(imgCropped, imgHsv, imgResult, 0);
-	else if (action == hsvSat)
-		setHsv(imgCropped, imgHsv, imgResult, 1);
-	else if (action == hsvVal)
-		setHsv(imgCropped, imgHsv, imgResult, 2);
-	else if (action == otsu)
+	else if (g_action == g_val)
 	{
-		// Thresholding image
-		Mat gray, bw;
-		cvtColor(imgCropped, gray, CV_BGR2GRAY);
-		cv::threshold(gray, bw, 60, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
-		imgResult = bw;
+		cvtColor(img, imgHsv, CV_BGR2HSV);
+		getChannel(imgHsv, img, 2);
 	}
-	else if (action == c0)
+	else if (g_action == g_hue_val)
 	{
-		cvtColor(imgCropped, imgHsv, CV_BGR2HSV);
-		channelDist(imgHsv, imgResult, 16, 0);
-		Mat c;
-		getChannel(imgHsv, c, 0);
-		showHistogram(c);
+		Mat d0, d2;
+		cvtColor(img, imgHsv, CV_BGR2HSV);
+		channelDist(imgHsv, d0, 16, 0);
+		bitwise_not(d0, d0);
+		getChannel(imgHsv, d2, 2);
+		addWeighted(d0, .5, d2, .5, 0, img);
 	}
-	else if (action == c1)
+
+//Gaussian Smoothing
+	if(gaussianSmoothing && img.channels() == 1)
+		GaussianBlur(img, img, Size(3, 3), 0);
+
+//Binarize
+	if(b_action == b_threshold && img.channels() == 1)
+		cv::threshold(img, img, val[0], 255, CV_THRESH_BINARY);
+	else if (b_action == b_rgb && img.channels() == 3)
+		inRange(img, Scalar(val[0], val[1], val[2]), Scalar(255, 255, 255), img);
+	else if (b_action == b_hsv && img.channels() == 3)
 	{
-		cvtColor(imgCropped, imgHsv, CV_BGR2HSV);
-		Mat result;
-		getChannel(imgHsv, result, 1);
-		showHistogram(result);
+		cvtColor(img, imgHsv, CV_BGR2HSV);
+		inRange(imgHsv, Scalar(val[0], val[1], val[2]), Scalar(255, 255, 255), img);
 	}
-	else if (action == c2)
+	else if (b_action == b_otsu && img.channels() == 1)
+		cv::threshold(img, img, 60, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+
+//Erode and Dilate
+	if(erodeDilate && img.channels() == 1)
 	{
-		cvtColor(imgCropped, imgHsv, CV_BGR2HSV);
-		channelDist(imgHsv, imgResult, 255, 2);
-		Mat c;
-		getChannel(imgHsv, c, 2);
-		showHistogram(c);
+		erode(img, img, getStructuringElement(MORPH_CROSS, Size(2 * 2 + 1, 2 * 2 + 1), Point(2, 2)));
+		dilate(img, img, getStructuringElement(MORPH_CROSS, Size(2 * 4 + 1, 2 * 4 + 1), Point(4, 4)));
 	}
-	else if (action == pretzel)
-	{
-		cvtColor(imgCropped, imgHsv, CV_BGR2HSV);
-		Mat d1, d2;
-		channelDist(imgHsv, d1, 16, 0);
 
-
-
-
-
-
-		
-
-
-		////find contours of filtered image using openCV findContours function
-		//findContours(bw, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE);
-
-		//int largestMomentIndex = 0;
-		//int largestMoment = 0;
-		//for (int i = 0; i < hierarchy.size(); i++)
-		//{
-		//	Moments mm = moments((Mat)contours[i]);
-		//	if (mm.m00 > largestMoment)
-		//	{
-		//		largestMomentIndex = i;
-		//		largestMoment = mm.m00;
-		//	}
-		//}
-
-		//Moments mm = moments((Mat)contours[largestMomentIndex]);
-		//double m00 = mm.m00;
-		//double m10 = mm.m10;
-		//double m01 = mm.m01;
-		//double centerX = (m10 / m00);
-		//double centerY = (m01 / m00);
-
-		//circle(croppedImage, Point(centerX, centerY), 4, Scalar(255, 0, 0));
-
-		//ballCenter.x += centerX - roiSide;
-		//ballCenter.y += centerY - roiAbove;
-	}
+//Other actions
+	if (action == hsvHue && img.channels() == 3)
+		setHsv(img, imgHsv, img, 0);
+	else if (action == hsvSat && img.channels() == 3)
+		setHsv(img, imgHsv, img, 1);
+	else if (action == hsvVal && img.channels() == 3)
+		setHsv(img, imgHsv, img, 2);
 	else if (action == canny)
 	{
 		// Convert the image to grayscale
 		Mat gray;
-		cvtColor(imgCropped, gray, CV_BGR2GRAY);
+		cvtColor(img, gray, CV_BGR2GRAY);
 
 		Mat detectedEdges;
 		// Reduce noise with a kernel 3x3
@@ -395,29 +413,28 @@ void processImage()
 
 		// Canny detector
 		Canny(detectedEdges, detectedEdges, val[0], val[0] * 3, 3);
-		imgResult = detectedEdges;
+		img = detectedEdges;
 	}
 	else if (action == action_lines)
 	{
-		imgResult = edgesC;
-		drawCrop(imgResult, pts, roi);
-		printf("%d lines, %d points, %d %d %d %d roi\n", lines.size(), pts.size(), roi.x, roi.y, roi.width, roi.height);
+		img = edgesC;
+		drawCrop(img, pts, roi);
 	}
 	else if (action == diff)
 	{
 		if (frame2.data)
 		{
-			imgResult = imgCropped.clone(); // Mat::zeros(frame.size(), frame.type());
-			absdiff(imgCropped, frame2, imgResult);
+			img = img.clone(); // Mat::zeros(frame.size(), frame.type());
+			absdiff(img, frame2, img);
 		}
-		frame2 = imgCropped.clone();
+		frame2 = img.clone();
 	}
 	else if (action == harris)
 	{
 		/// Convert the image to grayscale
 		Mat gray;
 		Mat dst, dst_norm, dst_norm_scaled;
-		cvtColor(imgCropped, gray, CV_BGR2GRAY);
+		cvtColor(img, gray, CV_BGR2GRAY);
 		if (val[0] < 1)
 			val[0] = 1;
 
@@ -431,11 +448,10 @@ void processImage()
 
 		/// Copy the source image
 		Mat copy;
-		copy = imgCropped.clone();
+		copy = img.clone();
 
 		/// Apply corner detection
-		goodFeaturesToTrack(gray, corners, val[0], qualityLevel,
-			minDistance, Mat(), blockSize, useHarrisDetector, k);
+		goodFeaturesToTrack(gray, corners, val[0], qualityLevel, minDistance, Mat(), blockSize, useHarrisDetector, k);
 
 		/// Draw corners detected
 		int r = 4;
@@ -444,7 +460,7 @@ void processImage()
 			circle(copy, corners[i], r, Scalar(rng.uniform(0, 255), rng.uniform(0, 255),
 				rng.uniform(0, 255)), -1, 8, 0);
 		}
-		imgResult = copy;
+		img = copy;
 
 		/// Set the neeed parameters to find the refined corners
 		Size winSize = Size(5, 5);
@@ -460,10 +476,9 @@ void processImage()
 		//	cout << " -- Refined Corner [" << i << "]  (" << corners[i].x << "," << corners[i].y << ")" << endl;
 		//}
 	}
-	if (!imgResult.empty())
-		imshow("White", imgResult);
-	else
-		printf("Empty\n");
+	imshow("White", img);
+	if(displayHist)
+		showHistogram(img);
 }
 
 void trackbarCallback(int, void*)
@@ -483,9 +498,9 @@ void mouseCallback(int event, int x, int y, int flags, void* userdata)
 		}
 		Vec3b v = imgHsv.at<Vec3b>(y, x);
 		printf("%d %d %d\n", v[0], v[1], v[2]);
-		Mat dist;
-		channelDist(imgHsv, dist, imgHsv.at<Vec3b>(y, x)[0], 0);
-		imshow("White", dist);
+		//Mat dist;
+		//channelDist(imgHsv, dist, imgHsv.at<Vec3b>(y, x)[0], 0);
+		//imshow("White", dist);
 	}
 }
 
@@ -496,10 +511,9 @@ int main(int argc, char** argv)
 
 	namedWindow("White", CV_WINDOW_AUTOSIZE);
 	setMouseCallback("White", mouseCallback, NULL);
-	createTrackbar("H Threshold", "White", &val[0], 255, trackbarCallback);
-	createTrackbar("S Threshold", "White", &val[1], 255, trackbarCallback);
-	createTrackbar("V Threshold", "White", &val[2], 255, trackbarCallback);
-	loadImage(imageNumber);
+	createTrackbar("H", "White", &val[0], 255, trackbarCallback);
+	createTrackbar("S", "White", &val[1], 255, trackbarCallback);
+	createTrackbar("V", "White", &val[2], 255, trackbarCallback);
 	while (true)
 	{
 		//Check for keyboard input

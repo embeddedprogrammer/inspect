@@ -10,10 +10,10 @@ int val[3];
 
 enum GrayAction { g_none, g_cvt, g_hue, g_sat, g_val, g_hue_val};
 enum BinarizeAction { b_none, b_threshold, b_rgb, b_hsv, b_otsu };
-enum Action { none, binarize, canny, action_lines, diff, harris, pretzel, otsu, hsvHue, hsvSat, hsvVal, c0, c1, c2};
+enum FeatureAction { f_none, f_binarize, f_canny, f_action_lines, f_diff, f_harris, f_pretzel, f_otsu, f_hsvHue, f_hsvSat, f_hsvVal, f_contours};
 GrayAction g_action = g_none;
 BinarizeAction b_action = b_none;
-Action action = none;
+FeatureAction f_action = f_none;
 bool displayHist;
 bool gaussianSmoothing;
 bool erodeDilate;
@@ -27,7 +27,7 @@ RNG rng(12345);
 #define RIGHT_ARROW 2555904
 #define DOWN_ARROW 2621440
 #define MIN_IMG_NUMBER 1
-#define MAX_IMG_NUMBER 16
+#define MAX_IMG_NUMBER 24
 #define STARTING_IMG_NUMBER 1
 
 Mat img, imgHsv;
@@ -115,14 +115,12 @@ void pressKey(int key)
 		imageNumber -= 1;
 		if (imageNumber < MIN_IMG_NUMBER)
 			imageNumber = MAX_IMG_NUMBER;
-		processImage();
 	}
 	else if (key == RIGHT_ARROW)
 	{
 		imageNumber += 1;
 		if (imageNumber > MAX_IMG_NUMBER)
 			imageNumber = MIN_IMG_NUMBER;
-		processImage();
 	}
 	else if (key == ENTER)
 	{
@@ -158,37 +156,34 @@ void pressKey(int key)
 		else if (cmd == "g")
 			gaussianSmoothing = !gaussianSmoothing;
 
-		// Other commands
+		// Feature commands
 		else if (cmd == "none")
-			action = none;
-		else if (cmd == "t")
-			action = pretzel;
-		else if (cmd == "b")
-			action = binarize;
-		else if (cmd == "u")
-			action = otsu;
+			f_action = f_none;
 		else if (cmd == "c")
-			action = canny;
+			f_action = f_contours;
+		else if (cmd == "t")
+			f_action = f_pretzel;
+		else if (cmd == "b")
+			f_action = f_binarize;
+		else if (cmd == "u")
+			f_action = f_otsu;
+		else if (cmd == "c")
+			f_action = f_canny;
 		else if (cmd == "l")
-			action = action_lines;
+			f_action = f_action_lines;
 		else if (cmd == "d")
-			action = diff;
+			f_action = f_diff;
 		else if (cmd == "h")
-			action = hsvHue;
+			f_action = f_hsvHue;
 		else if (cmd == "s")
-			action = hsvSat;
+			f_action = f_hsvSat;
 		else if (cmd == "v")
-			action = hsvVal;
-		else if (cmd == "0")
-			action = c0;
-		else if (cmd == "1")
-			action = c1;
-		else if (cmd == "2")
-			action = c2;
+			f_action = f_hsvVal;
 		else if (cmd == "save")
 			imwrite("test.png", img);
 		else if (cmd == "hist")
 			displayHist = !displayHist;
+
 		cmd = "";
 		cout << endl << ">";
 	}
@@ -395,13 +390,82 @@ void processImage()
 	}
 
 //Other actions
-	if (action == hsvHue && img.channels() == 3)
+	if (f_action == f_pretzel && img.channels() == 1)
+	{
+		//Find contours
+		vector<vector<Point> > contours;
+		vector<Vec4i> hierarchy;
+		findContours(img, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+		img = Mat::zeros(img.size(), CV_8UC3);
+		for (int i = 0; i < contours.size(); i++)
+			drawContours(img, contours, i, Scalar(255, 0, 0));
+
+		// Find parent contour
+		int pretzelContourIndex = -1;
+		int minPretzelSize = 1000;
+		int largestContourSize = minPretzelSize;
+		for (int i = 0; i < hierarchy.size(); i++)
+		{
+			if (hierarchy[i][3] == -1)
+			{
+				Moments mm = moments((Mat)contours[i]);
+				if (mm.m00 > largestContourSize)
+				{
+					pretzelContourIndex = i;
+					largestContourSize = mm.m00;
+					printf("Size: %d\n", (int)mm.m00);
+				}
+			}
+		}
+		int pretzelSize = largestContourSize;
+
+		// Evaluate pretzel based on contour children
+		int minHoleSize = 10;
+		int pass = -1;
+		if (pretzelContourIndex != -1)
+		{
+			// Find center of mass
+			Moments mm = moments((Mat)contours[pretzelContourIndex]);
+			double centerX = (mm.m10 / mm.m00);
+			double centerY = (mm.m01 / mm.m00);
+			circle(img, Point(centerX, centerY), 4, Scalar(0, 255, 0));
+
+			int borderSize = 100;
+			if (centerY > borderSize && centerY < img.size().height - borderSize)
+			{
+				int numberOfHoles = 0;
+				int child = hierarchy[pretzelContourIndex][2];
+				while (child != -1)
+				{
+					if (contours[child].size() > minHoleSize)
+						numberOfHoles++;
+					child = hierarchy[child][0];
+				}
+				if (numberOfHoles <= 1)
+					pass = 2;
+				else if (numberOfHoles == 2)
+					pass = 1;
+				else if (numberOfHoles == 3)
+					pass = 0;
+			}
+		}
+
+		if (pass == -1)
+			printf("None\n");
+		else if (pass == 0)
+			printf("Good\n");
+		else if (pass == 1)
+			printf("Bad\n");
+		else if (pass == 2)
+			printf("Ugly\n");
+	}
+	else if (f_action == f_hsvHue && img.channels() == 3)
 		setHsv(img, imgHsv, img, 0);
-	else if (action == hsvSat && img.channels() == 3)
+	else if (f_action == f_hsvSat && img.channels() == 3)
 		setHsv(img, imgHsv, img, 1);
-	else if (action == hsvVal && img.channels() == 3)
+	else if (f_action == f_hsvVal && img.channels() == 3)
 		setHsv(img, imgHsv, img, 2);
-	else if (action == canny)
+	else if (f_action == f_canny)
 	{
 		// Convert the image to grayscale
 		Mat gray;
@@ -415,12 +479,12 @@ void processImage()
 		Canny(detectedEdges, detectedEdges, val[0], val[0] * 3, 3);
 		img = detectedEdges;
 	}
-	else if (action == action_lines)
+	else if (f_action == f_action_lines)
 	{
 		img = edgesC;
 		drawCrop(img, pts, roi);
 	}
-	else if (action == diff)
+	else if (f_action == f_diff)
 	{
 		if (frame2.data)
 		{
@@ -429,7 +493,7 @@ void processImage()
 		}
 		frame2 = img.clone();
 	}
-	else if (action == harris)
+	else if (f_action == f_harris)
 	{
 		/// Convert the image to grayscale
 		Mat gray;
